@@ -1,0 +1,17 @@
+
+description: Alt Tab encoder behavior
+
+compatible: "zmk,behavior-alt-tab"
+
+properties:
+  label:
+    type: string
+
+  "#sensor-binding-cells":
+    type: int
+    required: true
+    const: 0
+
+  timeout-ms:
+    type: int
+    default: 1000

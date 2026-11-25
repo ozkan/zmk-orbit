@@ -1,0 +1,7 @@
+
+name: zmk-behavior-alt-tab
+
+build:
+  cmake: .
+  settings:
+    dts_root: .
