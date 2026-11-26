@@ -1,7 +1,7 @@
 
-description: Alt Tab encoder behavior
+description: One Encoder. Multiple Functions.
 
-compatible: "zmk,behavior-alt-tab"
+compatible: "zmk,behavior-orbit"
 
 properties:
   label:

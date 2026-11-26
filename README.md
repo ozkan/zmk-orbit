@@ -1,14 +1,51 @@
-# ZMK Behavior Alt-Tab
+# ZMK-Orbit
 
-A custom ZMK behavior that turns an encoder into a Windows-style Alt+Tab window switcher.
+One Encoder. Multiple Functions.
+
+A custom ZMK sensor behavior that turns a rotary encoder into a dual-purpose controller:
+
+- **Alt-Tab window switching**
+- **System volume control**
+
+The operating mode is selected automatically by the direction of the first encoder movement.
 
 ## Features
 
-- Clockwise: `Alt + Tab` (next window).
-- Counter-clockwise: `Alt + Shift + Tab` (previous window).
-- Alt remains pressed while rotating.
-- Alt is automatically released after a configurable inactivity timeout.
-- Default timeout: 1000 ms.
+### 1. Window Switching Mode
+
+Turn the encoder **clockwise first** to activate window switching mode.
+
+| Encoder direction | Action |
+|---|---|
+| Clockwise | `Alt + Tab` — Next window |
+| Counter-clockwise | `Alt + Shift + Tab` — Previous window |
+
+- `Alt` is held while switching between windows.
+- Each encoder movement sends a Tab keystroke.
+- `Alt` is automatically released after 1 second of inactivity.
+
+### 2. Volume Control Mode
+
+Turn the encoder **counter-clockwise first** to activate volume mode.
+
+| Encoder direction | Action |
+|---|---|
+| Clockwise | Volume Up |
+| Counter-clockwise | Volume Down |
+
+- Uses standard HID Consumer Control commands.
+- Each movement sends an individual volume command.
+- No keys remain held after an action.
+
+### Mode Selection & Reset
+
+The first encoder movement determines the operating mode:
+
+- First clockwise movement → Window switching mode.
+- First counter-clockwise movement → Volume control mode.
+- The selected mode remains locked until the session ends.
+- After **1 second of inactivity**, the behavior resets to idle.
+- The next movement can select a different mode.
 
 ## Installation
 
@@ -38,7 +75,7 @@ manifest:
     path: config
 ```
 
-## Usage
+## Configuration
 
 Add the behavior to your keymap:
 
@@ -54,31 +91,21 @@ Add the behavior to your keymap:
 };
 ```
 
-Assign it to your encoder:
+Bind it to your encoder:
 
 ```dts
 sensor-bindings = <&alt_tab>;
 ```
 
-## Configuration
+### Configuration Options
 
-| Property     | Description                                            | Default |
-|--------------|--------------------------------------------------------|---------|
-| `timeout-ms` | Inactivity timeout before releasing Alt (milliseconds) | `1000`  |
-
-
-Example: Set `timeout-ms = <1500>;` to release Alt after 1.5 seconds of inactivity.
-
-
-
+| Property | Default | Description |
+|---|---:|---|
+| `timeout-ms` | `1000` | Inactivity timeout before returning to idle mode |
 
 ## Compatibility
 
-Designed primarily for **Windows** window switching using `Alt + Tab`.
-
-The behavior sends standard HID key combinations. Other operating systems may require different key combinations and are not currently supported.
-
-
+Designed primarily for Windows using standard keyboard and Consumer Control HID commands. Other operating systems may require different shortcut handling.
 
 ## License
 

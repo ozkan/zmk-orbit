@@ -1,5 +1,5 @@
 
-#define DT_DRV_COMPAT zmk_behavior_alt_tab
+#define DT_DRV_COMPAT zmk_behavior_orbit
 
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
@@ -15,15 +15,15 @@
 
 #include <dt-bindings/zmk/keys.h>
 
-LOG_MODULE_REGISTER(behavior_alt_tab, CONFIG_ZMK_LOG_LEVEL);
+LOG_MODULE_REGISTER(behavior_orbit, CONFIG_ZMK_LOG_LEVEL);
 
-enum alt_tab_mode {
-    ALT_TAB_MODE_IDLE,
-    ALT_TAB_MODE_WINDOW,
-    ALT_TAB_MODE_VOLUME,
+enum orbit_mode {
+    ORBIT_MODE_IDLE,
+    ORBIT_MODE_WINDOW,
+    ORBIT_MODE_VOLUME,
 };
 
-struct alt_tab_data {
+struct orbit_data {
     struct k_work_delayable timeout_work;
 
     struct sensor_value remainder[ZMK_KEYMAP_SENSORS_LEN]
@@ -32,17 +32,17 @@ struct alt_tab_data {
     int triggers[ZMK_KEYMAP_SENSORS_LEN]
                 [ZMK_KEYMAP_LAYERS_LEN];
 
-    enum alt_tab_mode mode;
+    enum orbit_mode mode;
 
     bool alt_held;
 };
 
-struct alt_tab_config {
+struct orbit_config {
     uint32_t timeout_ms;
 };
 
 /* Send Alt press */
-static int alt_tab_press_alt(struct alt_tab_data *data, int64_t timestamp) {
+static int orbit_press_alt(struct orbit_data *data, int64_t timestamp) {
     if (data->alt_held) {
         return 0;
     }
@@ -58,7 +58,7 @@ static int alt_tab_press_alt(struct alt_tab_data *data, int64_t timestamp) {
 }
 
 /* Send Alt release */
-static void alt_tab_release_alt(struct alt_tab_data *data) {
+static void orbit_release_alt(struct orbit_data *data) {
     if (!data->alt_held) {
         return;
     }
@@ -70,7 +70,7 @@ static void alt_tab_release_alt(struct alt_tab_data *data) {
 }
 
 /* Send a complete key tap */
-static int alt_tab_send_key(uint32_t key, int64_t timestamp) {
+static int orbit_send_key(uint32_t key, int64_t timestamp) {
     int ret = raise_zmk_keycode_state_changed_from_encoded(
         key, true, timestamp);
 
@@ -83,22 +83,22 @@ static int alt_tab_send_key(uint32_t key, int64_t timestamp) {
 }
 
 /* Reset session after inactivity */
-static void alt_tab_timeout(struct k_work *work) {
+static void orbit_timeout(struct k_work *work) {
     struct k_work_delayable *dwork =
         k_work_delayable_from_work(work);
 
-    struct alt_tab_data *data =
-        CONTAINER_OF(dwork, struct alt_tab_data, timeout_work);
+    struct orbit_data *data =
+        CONTAINER_OF(dwork, struct orbit_data, timeout_work);
 
-    alt_tab_release_alt(data);
+    orbit_release_alt(data);
 
-    data->mode = ALT_TAB_MODE_IDLE;
+    data->mode = ORBIT_MODE_IDLE;
 
     LOG_DBG("Session ended");
 }
 
 /* Receive encoder sensor data */
-static int alt_tab_accept_data(
+static int orbit_accept_data(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event,
     const struct zmk_sensor_config *sensor_config,
@@ -108,7 +108,7 @@ static int alt_tab_accept_data(
     const struct device *dev =
         zmk_behavior_get_binding(binding->behavior_dev);
 
-    struct alt_tab_data *data = dev->data;
+    struct orbit_data *data = dev->data;
 
     if (channel_data_size == 0 || sensor_config == NULL) {
         return -EINVAL;
@@ -167,7 +167,7 @@ static int alt_tab_accept_data(
 }
 
 /* Process encoder rotation */
-static int alt_tab_process(
+static int orbit_process(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event,
     enum behavior_sensor_binding_process_mode mode) {
@@ -175,9 +175,9 @@ static int alt_tab_process(
     const struct device *dev =
         zmk_behavior_get_binding(binding->behavior_dev);
 
-    struct alt_tab_data *data = dev->data;
+    struct orbit_data *data = dev->data;
 
-    const struct alt_tab_config *cfg = dev->config;
+    const struct orbit_config *cfg = dev->config;
 
     int sensor_index =
         ZMK_SENSOR_POSITION_FROM_VIRTUAL_KEY_POSITION(event.position);
@@ -206,13 +206,13 @@ static int alt_tab_process(
     int steps = (triggers > 0) ? triggers : -triggers;
 
     /* Select mode only on the first movement */
-    if (data->mode == ALT_TAB_MODE_IDLE) {
+    if (data->mode == ORBIT_MODE_IDLE) {
 
         if (direction > 0) {
-            data->mode = ALT_TAB_MODE_WINDOW;
+            data->mode = ORBIT_MODE_WINDOW;
             LOG_DBG("Alt+Tab mode started");
         } else {
-            data->mode = ALT_TAB_MODE_VOLUME;
+            data->mode = ORBIT_MODE_VOLUME;
             LOG_DBG("Volume mode started");
         }
     }
@@ -222,10 +222,10 @@ static int alt_tab_process(
         &data->timeout_work,
         K_MSEC(cfg->timeout_ms));
 
-    if (data->mode == ALT_TAB_MODE_WINDOW) {
+    if (data->mode == ORBIT_MODE_WINDOW) {
 
         /* Keep Alt pressed */
-        int ret = alt_tab_press_alt(data, event.timestamp);
+        int ret = orbit_press_alt(data, event.timestamp);
 
         if (ret != 0) {
             return ret;
@@ -233,16 +233,16 @@ static int alt_tab_process(
 
         /* CW = Tab, CCW = Shift + Tab */
         uint32_t key = (direction > 0) ? TAB : LS(TAB);
-            
+
         for (int i = 0; i < steps; i++) {
-            ret = alt_tab_send_key(key, event.timestamp);
-        
+            ret = orbit_send_key(key, event.timestamp);
+
             if (ret != 0) {
                 return ret;
             }
         }
 
-    } else if (data->mode == ALT_TAB_MODE_VOLUME) {
+    } else if (data->mode == ORBIT_MODE_VOLUME) {
 
         /* Clockwise = Volume Up, Counter-clockwise = Volume Down */
         uint32_t key = (direction > 0)
@@ -250,7 +250,7 @@ static int alt_tab_process(
                            : C_VOLUME_DOWN;
 
         for (int i = 0; i < steps; i++) {
-            int ret = alt_tab_send_key(key, event.timestamp);
+            int ret = orbit_send_key(key, event.timestamp);
 
             if (ret != 0) {
                 return ret;
@@ -262,37 +262,37 @@ static int alt_tab_process(
 }
 
 /* Initialize behavior */
-static int alt_tab_init(const struct device *dev) {
-    struct alt_tab_data *data = dev->data;
+static int orbit_init(const struct device *dev) {
+    struct orbit_data *data = dev->data;
 
-    data->mode = ALT_TAB_MODE_IDLE;
+    data->mode = ORBIT_MODE_IDLE;
     data->alt_held = false;
 
     k_work_init_delayable(
         &data->timeout_work,
-        alt_tab_timeout);
+        orbit_timeout);
 
     return 0;
 }
 
-static const struct behavior_driver_api alt_tab_driver_api = {
-    .sensor_binding_accept_data = alt_tab_accept_data,
-    .sensor_binding_process = alt_tab_process,
+static const struct behavior_driver_api orbit_driver_api = {
+    .sensor_binding_accept_data = orbit_accept_data,
+    .sensor_binding_process = orbit_process,
 };
 
-#define ALT_TAB_INST(n)                                             \
-    static struct alt_tab_data alt_tab_data_##n;                    \
-    static const struct alt_tab_config alt_tab_config_##n = {       \
+#define ORBIT_INST(n)                                               \
+    static struct orbit_data orbit_data_##n;                        \
+    static const struct orbit_config orbit_config_##n = {           \
         .timeout_ms = DT_INST_PROP_OR(n, timeout_ms, 1000),         \
     };                                                              \
     BEHAVIOR_DT_INST_DEFINE(                                        \
         n,                                                          \
-        alt_tab_init,                                               \
+        orbit_init,                                                 \
         NULL,                                                       \
-        &alt_tab_data_##n,                                          \
-        &alt_tab_config_##n,                                        \
+        &orbit_data_##n,                                            \
+        &orbit_config_##n,                                          \
         POST_KERNEL,                                                \
         CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                        \
-        &alt_tab_driver_api);
+        &orbit_driver_api);
 
-DT_INST_FOREACH_STATUS_OKAY(ALT_TAB_INST)
+DT_INST_FOREACH_STATUS_OKAY(ORBIT_INST)

@@ -1,5 +1,5 @@
 
-name: zmk-behavior-alt-tab
+name: zmk-orbit
 
 build:
   cmake: .
