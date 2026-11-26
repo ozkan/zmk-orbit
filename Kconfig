@@ -2,7 +2,7 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: MIT
 
-config ZMK_BEHAVIOR_ALT_TAB
+config ZMK_BEHAVIOR_ORBIT
     bool
     default y
-    depends on DT_HAS_ZMK_BEHAVIOR_ALT_TAB_ENABLED
+    depends on DT_HAS_ZMK_BEHAVIOR_ORBIT_ENABLED
