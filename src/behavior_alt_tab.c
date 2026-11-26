@@ -1,6 +1,6 @@
 
 #define DT_DRV_COMPAT zmk_behavior_alt_tab
-#include <zephyr/sys/util.h>
+
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/sensor.h>
@@ -8,22 +8,31 @@
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
+#include <zmk/keymap.h>
 #include <zmk/sensors.h>
-#include <zmk/keys.h>
+#include <zmk/virtual_key_position.h>
+#include <zmk/events/keycode_state_changed.h>
 
 #include <dt-bindings/zmk/keys.h>
-#include <zmk/events/keycode_state_changed.h>
 
 LOG_MODULE_REGISTER(behavior_alt_tab, CONFIG_ZMK_LOG_LEVEL);
 
-#define ALT_KEY ZMK_HID_USAGE(HID_USAGE_KEY, HID_USAGE_KEY_KEYBOARD_LEFTALT)
+enum alt_tab_mode {
+    ALT_TAB_MODE_IDLE,
+    ALT_TAB_MODE_WINDOW,
+    ALT_TAB_MODE_VOLUME,
+};
 
 struct alt_tab_data {
     struct k_work_delayable timeout_work;
 
-    struct sensor_value remainder;
+    struct sensor_value remainder[ZMK_KEYMAP_SENSORS_LEN]
+                                 [ZMK_KEYMAP_LAYERS_LEN];
 
-    int triggers;
+    int triggers[ZMK_KEYMAP_SENSORS_LEN]
+                [ZMK_KEYMAP_LAYERS_LEN];
+
+    enum alt_tab_mode mode;
 
     bool alt_held;
 };
@@ -32,13 +41,14 @@ struct alt_tab_config {
     uint32_t timeout_ms;
 };
 
+/* Send Alt press */
 static int alt_tab_press_alt(struct alt_tab_data *data, int64_t timestamp) {
     if (data->alt_held) {
         return 0;
     }
 
     int ret = raise_zmk_keycode_state_changed_from_encoded(
-        ALT_KEY, true, timestamp);
+        LEFT_ALT, true, timestamp);
 
     if (ret == 0) {
         data->alt_held = true;
@@ -47,27 +57,19 @@ static int alt_tab_press_alt(struct alt_tab_data *data, int64_t timestamp) {
     return ret;
 }
 
+/* Send Alt release */
 static void alt_tab_release_alt(struct alt_tab_data *data) {
     if (!data->alt_held) {
         return;
     }
 
     raise_zmk_keycode_state_changed_from_encoded(
-        ALT_KEY, false, k_uptime_get());
+        LEFT_ALT, false, k_uptime_get());
 
     data->alt_held = false;
 }
 
-static void alt_tab_timeout(struct k_work *work) {
-    struct k_work_delayable *dwork =
-        k_work_delayable_from_work(work);
-
-    struct alt_tab_data *data =
-        CONTAINER_OF(dwork, struct alt_tab_data, timeout_work);
-
-    alt_tab_release_alt(data);
-}
-
+/* Send a complete key tap */
 static int alt_tab_send_key(uint32_t key, int64_t timestamp) {
     int ret = raise_zmk_keycode_state_changed_from_encoded(
         key, true, timestamp);
@@ -80,6 +82,22 @@ static int alt_tab_send_key(uint32_t key, int64_t timestamp) {
         key, false, timestamp);
 }
 
+/* Reset session after inactivity */
+static void alt_tab_timeout(struct k_work *work) {
+    struct k_work_delayable *dwork =
+        k_work_delayable_from_work(work);
+
+    struct alt_tab_data *data =
+        CONTAINER_OF(dwork, struct alt_tab_data, timeout_work);
+
+    alt_tab_release_alt(data);
+
+    data->mode = ALT_TAB_MODE_IDLE;
+
+    LOG_DBG("Session ended");
+}
+
+/* Receive encoder sensor data */
 static int alt_tab_accept_data(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event,
@@ -96,38 +114,59 @@ static int alt_tab_accept_data(
         return -EINVAL;
     }
 
-    const struct sensor_value value = channel_data[0].value;
+    int sensor_index =
+        ZMK_SENSOR_POSITION_FROM_VIRTUAL_KEY_POSITION(event.position);
 
-    if (value.val1 == 0) {
-        data->triggers = value.val2;
-        return 0;
-    }
-
-    data->remainder.val1 += value.val1;
-    data->remainder.val2 += value.val2;
-
-    if ((data->remainder.val2 < 0 ? -data->remainder.val2 : data->remainder.val2) >= 1000000) {
-        data->remainder.val1 +=
-            data->remainder.val2 / 1000000;
-
-        data->remainder.val2 %= 1000000;
-    }
-
-    int trigger_degrees =
-        360 / sensor_config->triggers_per_rotation;
-
-    if (trigger_degrees <= 0) {
+    if (sensor_index >= ZMK_KEYMAP_SENSORS_LEN ||
+        event.layer >= ZMK_KEYMAP_LAYERS_LEN) {
         return -EINVAL;
     }
 
-    data->triggers =
-        data->remainder.val1 / trigger_degrees;
+    const struct sensor_value value = channel_data[0].value;
 
-    data->remainder.val1 %= trigger_degrees;
+    int triggers;
+
+    /* Compatibility with older encoder sensor format */
+    if (value.val1 == 0) {
+        triggers = value.val2;
+    } else {
+        struct sensor_value remainder =
+            data->remainder[sensor_index][event.layer];
+
+        remainder.val1 += value.val1;
+        remainder.val2 += value.val2;
+
+        if (remainder.val2 >= 1000000 ||
+            remainder.val2 <= -1000000) {
+
+            remainder.val1 += remainder.val2 / 1000000;
+            remainder.val2 %= 1000000;
+        }
+
+        if (sensor_config->triggers_per_rotation == 0) {
+            return -EINVAL;
+        }
+
+        int trigger_degrees =
+            360 / sensor_config->triggers_per_rotation;
+
+        if (trigger_degrees <= 0) {
+            return -EINVAL;
+        }
+
+        triggers = remainder.val1 / trigger_degrees;
+
+        remainder.val1 %= trigger_degrees;
+
+        data->remainder[sensor_index][event.layer] = remainder;
+    }
+
+    data->triggers[sensor_index][event.layer] = triggers;
 
     return 0;
 }
 
+/* Process encoder rotation */
 static int alt_tab_process(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event,
@@ -140,50 +179,94 @@ static int alt_tab_process(
 
     const struct alt_tab_config *cfg = dev->config;
 
+    int sensor_index =
+        ZMK_SENSOR_POSITION_FROM_VIRTUAL_KEY_POSITION(event.position);
+
+    if (sensor_index >= ZMK_KEYMAP_SENSORS_LEN ||
+        event.layer >= ZMK_KEYMAP_LAYERS_LEN) {
+        return -EINVAL;
+    }
+
     if (mode != BEHAVIOR_SENSOR_BINDING_PROCESS_MODE_TRIGGER) {
-        data->triggers = 0;
+        data->triggers[sensor_index][event.layer] = 0;
         return ZMK_BEHAVIOR_TRANSPARENT;
     }
 
-    int triggers = data->triggers;
-    data->triggers = 0;
+    int triggers = data->triggers[sensor_index][event.layer];
+
+    data->triggers[sensor_index][event.layer] = 0;
 
     if (triggers == 0) {
         return ZMK_BEHAVIOR_TRANSPARENT;
     }
 
+    /* Positive = clockwise, negative = counter-clockwise */
     int direction = (triggers > 0) ? 1 : -1;
 
-    if (triggers < 0) {
-        triggers = -triggers;
-    }
+    int steps = (triggers > 0) ? triggers : -triggers;
 
-    int ret = alt_tab_press_alt(data, event.timestamp);
+    /* Select mode only on the first movement */
+    if (data->mode == ALT_TAB_MODE_IDLE) {
 
-    if (ret != 0) {
-        return ret;
-    }
-
-    for (int i = 0; i < triggers; i++) {
-
-        uint32_t key = (direction > 0) ? TAB : LS(TAB);
-
-        ret = alt_tab_send_key(key, event.timestamp);
-
-        if (ret != 0) {
-            return ret;
+        if (direction > 0) {
+            data->mode = ALT_TAB_MODE_WINDOW;
+            LOG_DBG("Alt+Tab mode started");
+        } else {
+            data->mode = ALT_TAB_MODE_VOLUME;
+            LOG_DBG("Volume mode started");
         }
     }
 
+    /* Restart inactivity timeout */
     k_work_reschedule(
         &data->timeout_work,
         K_MSEC(cfg->timeout_ms));
 
+    if (data->mode == ALT_TAB_MODE_WINDOW) {
+
+        /* Keep Alt pressed */
+        int ret = alt_tab_press_alt(data, event.timestamp);
+
+        if (ret != 0) {
+            return ret;
+        }
+
+        /* CW = Tab, CCW = Shift + Tab */
+        uint32_t key = (direction > 0) ? TAB : LS(TAB);
+            
+        for (int i = 0; i < steps; i++) {
+            ret = alt_tab_send_key(key, event.timestamp);
+        
+            if (ret != 0) {
+                return ret;
+            }
+        }
+
+    } else if (data->mode == ALT_TAB_MODE_VOLUME) {
+
+        /* Clockwise = Volume Up, Counter-clockwise = Volume Down */
+        uint32_t key = (direction > 0)
+                           ? C_VOLUME_UP
+                           : C_VOLUME_DOWN;
+
+        for (int i = 0; i < steps; i++) {
+            int ret = alt_tab_send_key(key, event.timestamp);
+
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+
     return ZMK_BEHAVIOR_OPAQUE;
 }
 
+/* Initialize behavior */
 static int alt_tab_init(const struct device *dev) {
     struct alt_tab_data *data = dev->data;
+
+    data->mode = ALT_TAB_MODE_IDLE;
+    data->alt_held = false;
 
     k_work_init_delayable(
         &data->timeout_work,
