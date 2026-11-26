@@ -82,10 +82,10 @@ Add the behavior to your keymap:
 ```dts
 / {
     behaviors {
-        alt_tab: alt_tab {
-            compatible = "zmk,behavior-alt-tab";
+        orbit: orbit {
+            compatible = "zmk,behavior-orbit";
             #sensor-binding-cells = <0>;
-            timeout-ms = <1000>;
+            timeout-ms = <800>;
         };
     };
 };
@@ -94,7 +94,7 @@ Add the behavior to your keymap:
 Bind it to your encoder:
 
 ```dts
-sensor-bindings = <&alt_tab>;
+sensor-bindings = <&orbit>;
 ```
 
 ### Configuration Options
