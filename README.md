@@ -66,10 +66,10 @@ manifest:
       revision: main
       import: app/west.yml
 
-+    - name: zmk-behavior-alt-tab
++    - name: zmk-orbit
 +      remote: ozkan
 +      revision: main
-+      path: modules/zmk-behavior-alt-tab
++      path: modules/zmk-orbit
 
   self:
     path: config
