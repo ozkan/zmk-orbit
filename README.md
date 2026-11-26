@@ -1,13 +1,35 @@
 # ZMK-Orbit
 
-One Encoder. Multiple Functions.
+One Encoder. Multiple Functions.    
+No extra layers or click gymnastics required: spin clockwise to window-hop, counter-clockwise to tweak volume, and pause for a second to start fresh.  
 
+
+```mermaid
+flowchart LR
+    Vol["🔊 <b>Volume Mode</b><br/>↺ CCW: Vol− <br/> ↻ CW: Vol+"] ~~~ Knob(("🎛️<br/>Encoder")) ~~~ Alt["🪟 <b>Alt+Tab Mode</b><br/>Alt held <br/> Tab per step ↺↻"]
+
+    Knob -->|"First ↺ CCW"| Vol
+    Knob -->|"First ↻ CW"| Alt
+
+    Vol -.->|"1s idle"| Knob
+    Alt -.->|"1s idle"| Knob
+
+    classDef knob fill:#1e293b,stroke:#60a5fa,stroke-width:2.5px,color:#f8fafc
+    classDef altMode fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff
+    classDef volMode fill:#042f2e,stroke:#2dd4bf,stroke-width:2px,color:#ccfbf1
+
+    class Knob knob
+    class Alt altMode
+    class Vol volMode
+
+``` 
+
+**Rule:** The operating mode is selected automatically by the first encoder movement, stays locked until the action finishes, and resets after 1 second of inactivity.      
 A custom ZMK sensor behavior that turns a rotary encoder into a dual-purpose controller:
 
-- **Alt-Tab window switching**
-- **System volume control**
+- **↻ Alt-Tab window switching**
+- **↺ System volume control**
 
-The operating mode is selected automatically by the direction of the first encoder movement.
 
 ## Features
 
