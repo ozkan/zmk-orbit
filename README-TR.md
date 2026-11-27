@@ -100,8 +100,9 @@ Her iki modda da son encoder hareketinden sonra 1 saniye boyunca hareketsizlik o
 `clockwise-keep-mods` ve `counter-clockwise-keep-mods` modifier tanımları isteğe bağlıdır. 
 Tanımlanmadığında ilgili modda modifier basılı tutulmaz.        
 `timeout-ms` değerini değiştirerek modun ne kadar süre aktif kalacağını ayarlayabilirsiniz.   
-Lisans
 
+
+## License
 MIT
 
 
