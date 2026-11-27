@@ -1,5 +1,5 @@
 
-description: One Encoder. Multiple Functions.
+description: Configurable dual-mode rotary encoder behavior
 
 compatible: "zmk,behavior-orbit"
 
@@ -11,6 +11,30 @@ properties:
     type: int
     required: true
     const: 0
+
+  clockwise:
+    type: array
+    required: true
+    description: >
+      Two keycodes. First for clockwise rotation,
+      second for counter-clockwise rotation when
+      clockwise mode is active.
+
+  counter-clockwise:
+    type: array
+    required: true
+    description: >
+      Two keycodes. First for clockwise rotation,
+      second for counter-clockwise rotation when
+      counter-clockwise mode is active.
+
+  clockwise-keep-mods:
+    type: array
+    description: Optional modifiers held during clockwise mode.
+
+  counter-clockwise-keep-mods:
+    type: array
+    description: Optional modifiers held during counter-clockwise mode.
 
   timeout-ms:
     type: int

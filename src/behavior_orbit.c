@@ -5,6 +5,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/sys/util.h>
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
@@ -19,8 +21,8 @@ LOG_MODULE_REGISTER(behavior_orbit, CONFIG_ZMK_LOG_LEVEL);
 
 enum orbit_mode {
     ORBIT_MODE_IDLE,
-    ORBIT_MODE_WINDOW,
-    ORBIT_MODE_VOLUME,
+    ORBIT_MODE_CLOCKWISE,
+    ORBIT_MODE_COUNTER_CLOCKWISE,
 };
 
 struct orbit_data {
@@ -34,39 +36,65 @@ struct orbit_data {
 
     enum orbit_mode mode;
 
-    bool alt_held;
+    const uint32_t *held_mods;
+    size_t held_mods_len;
 };
 
 struct orbit_config {
     uint32_t timeout_ms;
+
+    const uint32_t *clockwise_keys;
+    const uint32_t *counter_clockwise_keys;
+
+    const uint32_t *clockwise_mods;
+    size_t clockwise_mods_len;
+
+    const uint32_t *counter_clockwise_mods;
+    size_t counter_clockwise_mods_len;
 };
 
-/* Send Alt press */
-static int orbit_press_alt(struct orbit_data *data, int64_t timestamp) {
-    if (data->alt_held) {
-        return 0;
+/* Press all modifiers selected for the current session */
+static int orbit_press_mods(
+    struct orbit_data *data,
+    const uint32_t *mods,
+    size_t mods_len,
+    int64_t timestamp) {
+
+    data->held_mods = mods;
+    data->held_mods_len = 0;
+
+    for (size_t i = 0; i < mods_len; i++) {
+        int ret = raise_zmk_keycode_state_changed_from_encoded(
+            mods[i], true, timestamp);
+
+        if (ret != 0) {
+            /* Release modifiers already pressed */
+            for (size_t j = data->held_mods_len; j > 0; j--) {
+                raise_zmk_keycode_state_changed_from_encoded(
+                    mods[j - 1], false, timestamp);
+            }
+
+            data->held_mods = NULL;
+            data->held_mods_len = 0;
+
+            return ret;
+        }
+
+        data->held_mods_len++;
     }
 
-    int ret = raise_zmk_keycode_state_changed_from_encoded(
-        LEFT_ALT, true, timestamp);
-
-    if (ret == 0) {
-        data->alt_held = true;
-    }
-
-    return ret;
+    return 0;
 }
 
-/* Send Alt release */
-static void orbit_release_alt(struct orbit_data *data) {
-    if (!data->alt_held) {
-        return;
+/* Release all modifiers held by the current session */
+static void orbit_release_mods(struct orbit_data *data) {
+    for (size_t i = data->held_mods_len; i > 0; i--) {
+        raise_zmk_keycode_state_changed_from_encoded(
+            data->held_mods[i - 1], false, k_uptime_get());
     }
 
-    raise_zmk_keycode_state_changed_from_encoded(
-        LEFT_ALT, false, k_uptime_get());
-
-    data->alt_held = false;
+    data->held_mods = NULL;
+    data->held_mods_len = 0;
 }
 
 /* Send a complete key tap */
@@ -90,7 +118,7 @@ static void orbit_timeout(struct k_work *work) {
     struct orbit_data *data =
         CONTAINER_OF(dwork, struct orbit_data, timeout_work);
 
-    orbit_release_alt(data);
+    orbit_release_mods(data);
 
     data->mode = ORBIT_MODE_IDLE;
 
@@ -176,7 +204,6 @@ static int orbit_process(
         zmk_behavior_get_binding(binding->behavior_dev);
 
     struct orbit_data *data = dev->data;
-
     const struct orbit_config *cfg = dev->config;
 
     int sensor_index =
@@ -202,18 +229,42 @@ static int orbit_process(
 
     /* Positive = clockwise, negative = counter-clockwise */
     int direction = (triggers > 0) ? 1 : -1;
-
     int steps = (triggers > 0) ? triggers : -triggers;
 
-    /* Select mode only on the first movement */
+    /*
+     * Select the session mode on the first movement.
+     * The first movement also executes its corresponding key.
+     */
     if (data->mode == ORBIT_MODE_IDLE) {
 
+        int ret;
+
         if (direction > 0) {
-            data->mode = ORBIT_MODE_WINDOW;
-            LOG_DBG("Alt+Tab mode started");
+            data->mode = ORBIT_MODE_CLOCKWISE;
+
+            ret = orbit_press_mods(
+                data,
+                cfg->clockwise_mods,
+                cfg->clockwise_mods_len,
+                event.timestamp);
+
+            LOG_DBG("Clockwise mode started");
+
         } else {
-            data->mode = ORBIT_MODE_VOLUME;
-            LOG_DBG("Volume mode started");
+            data->mode = ORBIT_MODE_COUNTER_CLOCKWISE;
+
+            ret = orbit_press_mods(
+                data,
+                cfg->counter_clockwise_mods,
+                cfg->counter_clockwise_mods_len,
+                event.timestamp);
+
+            LOG_DBG("Counter-clockwise mode started");
+        }
+
+        if (ret != 0) {
+            data->mode = ORBIT_MODE_IDLE;
+            return ret;
         }
     }
 
@@ -222,39 +273,25 @@ static int orbit_process(
         &data->timeout_work,
         K_MSEC(cfg->timeout_ms));
 
-    if (data->mode == ORBIT_MODE_WINDOW) {
+    /*
+     * Select the key according to the active mode
+     * and current rotation direction.
+     *
+     * Index 0 = clockwise
+     * Index 1 = counter-clockwise
+     */
+    const uint32_t *keys =
+        (data->mode == ORBIT_MODE_CLOCKWISE)
+            ? cfg->clockwise_keys
+            : cfg->counter_clockwise_keys;
 
-        /* Keep Alt pressed */
-        int ret = orbit_press_alt(data, event.timestamp);
+    uint32_t key = keys[(direction > 0) ? 0 : 1];
+
+    for (int i = 0; i < steps; i++) {
+        int ret = orbit_send_key(key, event.timestamp);
 
         if (ret != 0) {
             return ret;
-        }
-
-        /* CW = Tab, CCW = Shift + Tab */
-        uint32_t key = (direction > 0) ? TAB : LS(TAB);
-
-        for (int i = 0; i < steps; i++) {
-            ret = orbit_send_key(key, event.timestamp);
-
-            if (ret != 0) {
-                return ret;
-            }
-        }
-
-    } else if (data->mode == ORBIT_MODE_VOLUME) {
-
-        /* Clockwise = Volume Up, Counter-clockwise = Volume Down */
-        uint32_t key = (direction > 0)
-                           ? C_VOLUME_UP
-                           : C_VOLUME_DOWN;
-
-        for (int i = 0; i < steps; i++) {
-            int ret = orbit_send_key(key, event.timestamp);
-
-            if (ret != 0) {
-                return ret;
-            }
         }
     }
 
@@ -266,7 +303,8 @@ static int orbit_init(const struct device *dev) {
     struct orbit_data *data = dev->data;
 
     data->mode = ORBIT_MODE_IDLE;
-    data->alt_held = false;
+    data->held_mods = NULL;
+    data->held_mods_len = 0;
 
     k_work_init_delayable(
         &data->timeout_work,
@@ -280,19 +318,39 @@ static const struct behavior_driver_api orbit_driver_api = {
     .sensor_binding_process = orbit_process,
 };
 
-#define ORBIT_INST(n)                                               \
-    static struct orbit_data orbit_data_##n;                        \
-    static const struct orbit_config orbit_config_##n = {           \
-        .timeout_ms = DT_INST_PROP_OR(n, timeout_ms, 1000),         \
-    };                                                              \
-    BEHAVIOR_DT_INST_DEFINE(                                        \
-        n,                                                          \
-        orbit_init,                                                 \
-        NULL,                                                       \
-        &orbit_data_##n,                                            \
-        &orbit_config_##n,                                          \
-        POST_KERNEL,                                                \
-        CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                        \
+#define ORBIT_INST(n)                                                   \
+    BUILD_ASSERT(DT_INST_PROP_LEN(n, clockwise) == 2,                   \
+                 "clockwise must contain exactly two keycodes");       \
+    BUILD_ASSERT(DT_INST_PROP_LEN(n, counter_clockwise) == 2,           \
+                 "counter-clockwise must contain exactly two keycodes");\
+    static const uint32_t orbit_clockwise_keys_##n[] =                  \
+        DT_INST_PROP(n, clockwise);                                     \
+    static const uint32_t orbit_counter_clockwise_keys_##n[] =          \
+        DT_INST_PROP(n, counter_clockwise);                             \
+    static const uint32_t orbit_clockwise_mods_##n[] =                  \
+        DT_INST_PROP_OR(n, clockwise_keep_mods, {0});                   \
+    static const uint32_t orbit_counter_clockwise_mods_##n[] =          \
+        DT_INST_PROP_OR(n, counter_clockwise_keep_mods, {0});           \
+    static struct orbit_data orbit_data_##n;                            \
+    static const struct orbit_config orbit_config_##n = {               \
+        .timeout_ms = DT_INST_PROP_OR(n, timeout_ms, 1000),              \
+        .clockwise_keys = orbit_clockwise_keys_##n,                     \
+        .counter_clockwise_keys = orbit_counter_clockwise_keys_##n,     \
+        .clockwise_mods = orbit_clockwise_mods_##n,                     \
+        .clockwise_mods_len =                                           \
+            DT_INST_PROP_LEN_OR(n, clockwise_keep_mods, 0),             \
+        .counter_clockwise_mods = orbit_counter_clockwise_mods_##n,     \
+        .counter_clockwise_mods_len =                                   \
+            DT_INST_PROP_LEN_OR(n, counter_clockwise_keep_mods, 0),     \
+    };                                                                  \
+    BEHAVIOR_DT_INST_DEFINE(                                            \
+        n,                                                              \
+        orbit_init,                                                     \
+        NULL,                                                           \
+        &orbit_data_##n,                                                \
+        &orbit_config_##n,                                              \
+        POST_KERNEL,                                                    \
+        CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                            \
         &orbit_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ORBIT_INST)
