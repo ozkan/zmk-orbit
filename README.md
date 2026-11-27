@@ -1,5 +1,7 @@
 # ZMK-Orbit
 
+[🇬🇧 English](README.md) | [🇹🇷 Türkçe](README-TR.md) 
+
 **One Encoder. Multiple Functions.**
 
 Turn one way to select a mode, then use both encoder directions for different actions. No extra layers or click gymnastics required.
