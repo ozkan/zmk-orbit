@@ -1,12 +1,16 @@
 # ZMK-Orbit
 
-One Encoder. Multiple Functions.    
-No extra layers or click gymnastics required: spin clockwise to window-hop, counter-clockwise to tweak volume, and pause for a second to start fresh.  
+**One Encoder. Multiple Functions.**
 
+Turn one way to select a mode, then use both encoder directions for different actions. No extra layers or click gymnastics required.
+
+ZMK-Orbit is a configurable ZMK sensor behavior that turns a rotary encoder into a dual-mode controller. Each mode has its own clockwise and counter-clockwise key mappings, with optional modifiers that remain held throughout the session.
+
+## How It Works (example)
 
 ```mermaid
 flowchart LR
-    Vol["🔊 <b>Volume Mode</b><br/>↺ CCW: Vol− <br/> ↻ CW: Vol+"] ~~~ Knob(("🎛️<br/>Encoder")) ~~~ Alt["🪟 <b>Alt+Tab Mode</b><br/>Alt held <br/> Tab per step ↺↻"]
+    Vol["🔊 <b>Volume Mode</b><br/>↺ CCW: Vol− <br/> ↻ CW: Vol+"] ~~~ Knob(("🎛️<br/>Encoder")) ~~~ Alt["🪟 <b>Alt+Tab Mode</b><br/>Alt held<br/>↻ Tab<br/>↺ Shift+Tab"]
 
     Knob -->|"First ↺ CCW"| Vol
     Knob -->|"First ↻ CW"| Alt
@@ -14,7 +18,7 @@ flowchart LR
     Vol -.->|"1s idle"| Knob
     Alt -.->|"1s idle"| Knob
 
-    classDef knob fill:#1e293b,stroke:#60a5fa,stroke-width:2.5px,color:#f8fafc
+    classDef knob fill:#1e293b,stroke:#ff8210,stroke-width:2.5px,color:#f8fafc
     classDef altMode fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff
     classDef volMode fill:#042f2e,stroke:#2dd4bf,stroke-width:2px,color:#ccfbf1
 
@@ -22,65 +26,62 @@ flowchart LR
     class Alt altMode
     class Vol volMode
 
-``` 
+```
 
-**Rule:** The operating mode is selected automatically by the first encoder movement, stays locked until the action finishes, and resets after 1 second of inactivity.      
-A custom ZMK sensor behavior that turns a rotary encoder into a dual-purpose controller:
 
-- **↻ Alt-Tab window switching**
-- **↺ System volume control**
+**Mode selection rule:**
 
+- First clockwise movement selects the clockwise mode.
+- First counter-clockwise movement selects the counter-clockwise mode.
+- The first movement also executes its corresponding action.
+- The selected mode remains locked until the inactivity timeout expires.
+- When the session ends, all held modifiers are released and the behavior returns to idle.
 
 ## Features
 
-### 1. Window Switching Mode
+### 1. Two Independent Modes
 
-Turn the encoder **clockwise first** to activate window switching mode.
+Each mode has two configurable key mappings:
 
-| Encoder direction | Action |
-|---|---|
-| Clockwise | `Alt + Tab` — Next window |
-| Counter-clockwise | `Alt + Shift + Tab` — Previous window |
+| Active mode | Encoder direction | Key mapping |
+|---|---|---|
+| Clockwise mode | Clockwise | `clockwise[0]` |
+| Clockwise mode | Counter-clockwise | `clockwise[1]` |
+| Counter-clockwise mode | Clockwise | `counter-clockwise[0]` |
+| Counter-clockwise mode | Counter-clockwise | `counter-clockwise[1]` |
 
-- `Alt` is held while switching between windows.
-- Each encoder movement sends a Tab keystroke.
-- `Alt` is automatically released after 1 second of inactivity.
+Each encoder step sends an individual key tap.
 
-### 2. Volume Control Mode
+### 2. Persistent Modifier Support
 
-Turn the encoder **counter-clockwise first** to activate volume mode.
+Each mode can optionally hold one or more modifiers throughout its session.
 
-| Encoder direction | Action |
-|---|---|
-| Clockwise | Volume Up |
-| Counter-clockwise | Volume Down |
+- Modifiers are pressed once when a mode is selected.
+- They remain held while the encoder is used in either direction.
+- Individual key taps are sent without releasing the held modifiers.
+- All held modifiers are released when the session times out.
 
-- Uses standard HID Consumer Control commands.
-- Each movement sends an individual volume command.
-- No keys remain held after an action.
+This makes combinations such as `Alt + Tab`, `Alt + Shift + Tab`, or other modifier-based shortcuts possible without pressing the modifier again for every encoder step.
 
-### Mode Selection & Reset
+### 3. Automatic Session Reset
 
-The first encoder movement determines the operating mode:
-
-- First clockwise movement → Window switching mode.
-- First counter-clockwise movement → Volume control mode.
-- The selected mode remains locked until the session ends.
-- After **1 second of inactivity**, the behavior resets to idle.
-- The next movement can select a different mode.
+- The default inactivity timeout is **1000 ms**.
+- Every encoder movement restarts the timeout.
+- When the timeout expires, held modifiers are released and the mode resets to idle.
+- The next encoder movement can select either mode.
 
 ## Installation
 
 Add the module to your `config/west.yml`:
 
-```diff
+```yaml
 manifest:
   remotes:
     - name: zmkfirmware
       url-base: https://github.com/zmkfirmware
 
-+    - name: ozkan
-+      url-base: https://github.com/ozkan
+    - name: ozkan
+      url-base: https://github.com/ozkan
 
   projects:
     - name: zmk
@@ -88,10 +89,10 @@ manifest:
       revision: main
       import: app/west.yml
 
-+    - name: zmk-orbit
-+      remote: ozkan
-+      revision: main
-+      path: modules/zmk-orbit
+    - name: zmk-orbit
+      remote: ozkan
+      revision: main
+      path: modules/zmk-orbit
 
   self:
     path: config
@@ -107,7 +108,13 @@ Add the behavior to your keymap:
         orbit: orbit {
             compatible = "zmk,behavior-orbit";
             #sensor-binding-cells = <0>;
-            timeout-ms = <800>;
+
+            clockwise = <TAB>, <LS(TAB)>;
+            counter-clockwise = <C_VOLUME_UP>, <C_VOLUME_DOWN>;
+
+            clockwise-keep-mods = <LEFT_ALT>;
+
+            timeout-ms = <1000>;
         };
     };
 };
@@ -119,15 +126,57 @@ Bind it to your encoder:
 sensor-bindings = <&orbit>;
 ```
 
-### Configuration Options
+With this example:
 
-| Property | Default | Description |
-|---|---:|---|
-| `timeout-ms` | `1000` | Inactivity timeout before returning to idle mode |
+| First movement    | Subsequent direction  | Action |
+|-------------------|-----------------------|--------|
+| Clockwise         | Clockwise             |  `Alt + Tab` |
+| Clockwise         | Counter-clockwise     | `Alt + Shift + Tab` |
+| Counter-clockwise | Clockwise             | Volume Up |
+| Counter-clockwise | Counter-clockwise     | Volume Down |
+
+`LEFT_ALT` is pressed once when clockwise mode starts and remains held until the session ends. Volume mode does not hold any modifiers.
+
+## Configuration Options
+
+| Property | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `clockwise` | Yes | — | Two keycodes: clockwise action first, counter-clockwise action second, when clockwise mode is active. |
+| `counter-clockwise` | Yes | — | Two keycodes: clockwise action first, counter-clockwise action second, when counter-clockwise mode is active. |
+| `clockwise-keep-mods` | No | None | Modifier keycodes held throughout clockwise mode. |
+| `counter-clockwise-keep-mods` | No | None | Modifier keycodes held throughout counter-clockwise mode. |
+| `timeout-ms` | No | `1000` | Inactivity timeout before returning to idle mode. |
+
+**Important:**
+- Both action properties must contain exactly two keycodes.
+- In each pair, the first keycode is for clockwise rotation and the second is for counter-clockwise rotation.
+- Modifier properties accept one or more keycodes.
+- If a modifier property is omitted, no modifiers are held in that mode.
+
+## Customization Examples
+These examples illustrate the configurable mappings; the actual keycodes and shortcuts depend on the host operating system.
+
+
+**Mac switching and volume control:**
+
+```dts
+clockwise = <TAB>, <LS(TAB)>;
+counter-clockwise = <C_VOLUME_UP>, <C_VOLUME_DOWN>;
+clockwise-keep-mods = <LEFT_GUI>;
+```
+
+**Custom shortcut mode: (Spotify Playback Control Mode)**
+
+```dts
+clockwise = <LC(RIGHT)>, <LC(LEFT)>;   // ↻ Skip to the next track. ↺ Skip to the previous track.
+counter-clockwise = <C_VOLUME_UP>, <C_VOLUME_DOWN>;  // ↺ Volume down.  ↻ Volume up.
+timeout-ms = <800>; // Exit the custom shortcut mode after 800 ms of inactivity.
+```
+
 
 ## Compatibility
 
-Designed primarily for Windows using standard keyboard and Consumer Control HID commands. Other operating systems may require different shortcut handling.
+ZMK-Orbit uses standard ZMK keycode state events and sensor bindings. Key mappings and modifier behavior depend on the HID support and shortcut conventions of the host operating system.
 
 ## License
 
