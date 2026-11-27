@@ -45,7 +45,7 @@ Ardından keymap dosyanızda behavior tanımını ekleyin:
 };
 ```
 
-Son olarak encoder'ınızın sensor-bindings tanımına behavior'ı ekleyin:  
+Son olarak orbit behavior'ını kullanmak istediğiniz layer'ın sensor-bindings alanına ekleyin:
 
 ```dts
 sensor-bindings = <&orbit>;
